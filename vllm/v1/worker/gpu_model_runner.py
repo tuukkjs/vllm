@@ -3374,6 +3374,10 @@ class GPUModelRunner(
         # Update output token ids with tokens sampled in last step
         # if async scheduling and required by current sampling params.
         self.input_batch.update_async_output_token_ids()
+        if logits is not None and logits.shape[-1] > self.input_batch.vocab_size:
+            # The LM head may be padded for tensor parallelism. Prevent the
+            # sampler from returning token ids outside the tokenizer vocabulary.
+            logits[:, self.input_batch.vocab_size :] = -float("inf")
         if spec_decode_metadata is None:
             return self.sampler(
                 logits=logits,
