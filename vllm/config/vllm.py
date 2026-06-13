@@ -1151,6 +1151,24 @@ class VllmConfig:
             )
 
         if (
+            current_platform.is_rocm()
+            and self.model_config is not None
+            and any(
+                a in ("DeepseekV4ForCausalLM", "DeepSeekV4MTPModel")
+                for a in self.model_config.architectures
+            )
+            and self.compilation_config.cudagraph_mode
+            not in (CUDAGraphMode.NONE, CUDAGraphMode.FULL_DECODE_ONLY)
+        ):
+            logger.warning_once(
+                "DeepSeek V4 on ROCm does not support %s with the fused "
+                "sqrtsoftplus router without accuracy loss. Overriding "
+                "cudagraph_mode to FULL_DECODE_ONLY.",
+                self.compilation_config.cudagraph_mode.name,
+            )
+            self.compilation_config.cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
+
+        if (
             self.compilation_config.cudagraph_mode.requires_piecewise_compilation()
             and self.compilation_config.mode != CompilationMode.VLLM_COMPILE
             and not envs.VLLM_USE_BREAKABLE_CUDAGRAPH
