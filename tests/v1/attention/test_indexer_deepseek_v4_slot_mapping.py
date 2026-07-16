@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -90,3 +92,32 @@ def test_indexer_builder_deepseek_v4_compressed_slot_mapping_uses_storage_block_
         device=device,
     )
     torch.testing.assert_close(valid_slots, expected)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_indexer_decode_block_table_workspace_includes_spec_lookahead_block():
+    device = torch.device("cuda")
+    block_size = 64
+    max_model_len = 100000
+
+    kv_cache_spec = MLAAttentionSpec(
+        block_size=block_size,
+        num_kv_heads=1,
+        head_size=128,
+        dtype=torch.bfloat16,
+    )
+    vllm_config = create_vllm_config(
+        max_model_len=max_model_len,
+        block_size=block_size,
+    )
+    vllm_config.speculative_config = SimpleNamespace(num_speculative_tokens=3)
+
+    builder = DeepseekV32IndexerMetadataBuilder(
+        kv_cache_spec=kv_cache_spec,
+        layer_names=["dummy"],
+        vllm_config=vllm_config,
+        device=device,
+    )
+
+    base_blocks = (max_model_len + block_size - 1) // block_size
+    assert builder.expanded_block_table_buffer.shape[1] == base_blocks + 1

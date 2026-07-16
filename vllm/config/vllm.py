@@ -837,6 +837,38 @@ class VllmConfig:
         )
         speculative_config.num_speculative_tokens_per_batch_size = None
 
+    def _maybe_override_rocm_sparse_mla_spec_cudagraph_mode(self) -> None:
+        from vllm.platforms import current_platform
+
+        if (
+            not current_platform.is_rocm()
+            or self.speculative_config is None
+            or self.attention_config.backend is None
+            or self.attention_config.backend.name != "ROCM_AITER_MLA_SPARSE"
+            or self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE
+        ):
+            return
+
+        if self.compilation_config.cudagraph_mode == CUDAGraphMode.PIECEWISE:
+            logger.warning_once(
+                "PIECEWISE CUDAGraphs are disabled for ROCm AITER sparse MLA "
+                "with speculative decoding because mixed prefill/decode "
+                "speculative batches can fault on this backend."
+            )
+            self.compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+            return
+
+        if self.compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY:
+            return
+
+        logger.warning_once(
+            "Mixed-batch CUDAGraphs are disabled for ROCm AITER sparse MLA "
+            "with speculative decoding because mixed prefill/decode "
+            "speculative batches can fault on this backend. Full CUDAGraphs "
+            "are still enabled for uniform decode batches."
+        )
+        self.compilation_config.cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
+
     def _post_init_kv_transfer_config(self) -> None:
         """Update KVTransferConfig based on top-level configs in VllmConfig.
 
@@ -1149,19 +1181,7 @@ class VllmConfig:
             self.compilation_config.mode = CompilationMode.NONE
             self.compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
-        if (
-            current_platform.is_rocm()
-            and self.speculative_config is not None
-            and self.attention_config.backend is not None
-            and self.attention_config.backend.name == "ROCM_AITER_MLA_SPARSE"
-            and self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-        ):
-            logger.warning_once(
-                "CUDAGraphs are disabled for ROCm AITER sparse MLA with "
-                "speculative decoding because mixed prefill/decode speculative "
-                "batches can fault on this backend."
-            )
-            self.compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+        self._maybe_override_rocm_sparse_mla_spec_cudagraph_mode()
 
         if os.environ.get("TORCH_COMPILE_DISABLE") == "1":
             logger.warning(

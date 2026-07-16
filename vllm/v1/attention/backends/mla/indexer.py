@@ -29,7 +29,6 @@ from vllm.v1.attention.backends.utils import (
     split_decodes_and_prefills,
 )
 from vllm.v1.kv_cache_interface import AttentionSpec, MLAAttentionSpec
-from vllm.v1.worker.cp_utils import get_total_cp_world_size
 
 logger = init_logger(__name__)
 
@@ -337,10 +336,20 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
             dtype=torch.int32,
             device=self.device,
         )
-        max_num_blocks_per_req = cdiv(
+        max_block_table_len = max(
             self.vllm_config.model_config.max_model_len,
-            self.kv_cache_spec.block_size * get_total_cp_world_size(),
+            self.vllm_config.scheduler_config.max_num_encoder_input_tokens,
         )
+        max_num_blocks_per_req = self.kv_cache_spec.max_num_blocks_per_req(
+            self.vllm_config, max_block_table_len
+        )
+        if self.vllm_config.num_speculative_tokens > 0:
+            # The runtime block table reserves a lookahead block for speculative
+            # tokens. Mirror that width so decode expansion can copy full rows.
+            max_num_blocks_per_req += cdiv(
+                self.vllm_config.num_speculative_tokens,
+                self.kv_cache_spec.block_size,
+            )
         self.expanded_block_table_buffer = torch.zeros(
             (
                 scheduler_config.max_num_batched_tokens,

@@ -99,6 +99,35 @@ def test_resolve_cudagraph_mode_adjusts_spec_decode_sizes_only_for_v1(
 
 
 @pytest.mark.parametrize(
+    ("requested_mode", "expected_mode"),
+    [
+        (CUDAGraphMode.FULL_AND_PIECEWISE, CUDAGraphMode.FULL_DECODE_ONLY),
+        (CUDAGraphMode.FULL, CUDAGraphMode.FULL_DECODE_ONLY),
+        (CUDAGraphMode.FULL_DECODE_ONLY, CUDAGraphMode.FULL_DECODE_ONLY),
+        (CUDAGraphMode.PIECEWISE, CUDAGraphMode.NONE),
+        (CUDAGraphMode.NONE, CUDAGraphMode.NONE),
+    ],
+)
+def test_rocm_sparse_mla_spec_decode_keeps_decode_cudagraphs(
+    monkeypatch,
+    requested_mode,
+    expected_mode,
+):
+    monkeypatch.setattr(current_platform, "is_rocm", lambda: True)
+
+    config = object.__new__(VllmConfig)
+    config.speculative_config = object()
+    config.attention_config = SimpleNamespace(
+        backend=SimpleNamespace(name="ROCM_AITER_MLA_SPARSE")
+    )
+    config.compilation_config = CompilationConfig(cudagraph_mode=requested_mode)
+
+    config._maybe_override_rocm_sparse_mla_spec_cudagraph_mode()
+
+    assert config.compilation_config.cudagraph_mode == expected_mode
+
+
+@pytest.mark.parametrize(
     ("model_config", "expected"),
     [
         (
