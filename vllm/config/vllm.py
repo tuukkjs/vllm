@@ -1007,7 +1007,6 @@ class VllmConfig:
             and self.parallel_config.enable_dbo
             and self.parallel_config.all2all_backend == "deepep_high_throughput"
         )
-
         if self.scheduler_config.async_scheduling:
             # Async scheduling explicitly enabled, hard fail any incompatibilities.
             # Currently, async scheduling only support eagle speculative
@@ -1148,6 +1147,20 @@ class VllmConfig:
                 "This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none"
             )
             self.compilation_config.mode = CompilationMode.NONE
+            self.compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
+        if (
+            current_platform.is_rocm()
+            and self.speculative_config is not None
+            and self.attention_config.backend is not None
+            and self.attention_config.backend.name == "ROCM_AITER_MLA_SPARSE"
+            and self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            logger.warning_once(
+                "CUDAGraphs are disabled for ROCm AITER sparse MLA with "
+                "speculative decoding because mixed prefill/decode speculative "
+                "batches can fault on this backend."
+            )
             self.compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
         if os.environ.get("TORCH_COMPILE_DISABLE") == "1":
