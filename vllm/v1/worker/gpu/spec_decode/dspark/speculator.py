@@ -30,6 +30,7 @@ import torch
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
 from vllm.logger import init_logger
+from vllm.v1.worker.gpu.input_batch import InputBuffers
 from vllm.v1.worker.gpu.sample.gumbel import gumbel_sample
 from vllm.v1.worker.gpu.spec_decode.dflash.speculator import DFlashSpeculator
 from vllm.v1.worker.gpu.spec_decode.dspark.utils import load_dspark_model
@@ -53,6 +54,14 @@ class DSparkSpeculator(DFlashSpeculator):
             self.num_query_per_req = self.num_speculative_steps
         else:
             self.num_query_per_req = 1 + self.num_speculative_steps
+        max_num_query_tokens = self.max_num_reqs * self.num_query_per_req
+        if max_num_query_tokens > self.max_num_tokens:
+            self.max_num_tokens = max_num_query_tokens
+            self.input_buffers = InputBuffers(
+                max_num_reqs=self.max_num_reqs,
+                max_num_tokens=self.max_num_tokens,
+                device=device,
+            )
 
         # DSpark consumes mean-pooled target aux hidden states at the target
         # layers, combined to hidden_size via main_proj. Store that combined
@@ -61,6 +70,9 @@ class DSparkSpeculator(DFlashSpeculator):
         draft_hidden = self.draft_model_config.get_hidden_size()
         self.hidden_states = torch.zeros(
             self.max_num_tokens, draft_hidden, dtype=self.dtype, device=device
+        )
+        self.context_positions = torch.zeros(
+            self.max_num_tokens, dtype=torch.int64, device=device
         )
 
         self._step_cols = torch.arange(
